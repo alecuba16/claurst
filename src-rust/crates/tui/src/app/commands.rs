@@ -2,6 +2,7 @@
 
 use claurst_core::config::Theme;
 use claurst_core::types::Role;
+use crate::dialog_select::{DialogSelectState, SelectItem};
 use crate::notifications::NotificationKind;
 use crate::overlays::HelpEntry;
 use super::App;
@@ -97,6 +98,94 @@ pub(super) fn help_overlay_entries() -> Vec<HelpEntry> {
 }
 
 impl App {
+    /// Re-scan skill directories and update the cached discovered-skills list.
+    pub fn refresh_discovered_skills(&mut self) {
+        let cwd = self
+            .config
+            .project_dir
+            .as_deref()
+            .or_else(|| self.current_dir.as_deref().map(std::path::Path::new))
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let discovered = claurst_core::discover_skills(cwd, &self.config.skills);
+        let mut list: Vec<(String, String)> = discovered
+            .into_iter()
+            .map(|(name, skill)| (name, skill.description))
+            .collect();
+        list.sort_by(|a, b| a.0.cmp(&b.0));
+        self.discovered_skills = list;
+    }
+
+    /// Return all slash commands available: built-in, custom templates, and discovered skills.
+    pub fn all_slash_commands(&self) -> Vec<(String, String)> {
+        let mut cmds: Vec<(String, String)> = PROMPT_SLASH_COMMANDS
+            .iter()
+            .map(|(n, d)| ((*n).to_string(), (*d).to_string()))
+            .collect();
+        for (name, template) in &self.config.commands {
+            cmds.push((
+                name.clone(),
+                template.description.clone().unwrap_or_default(),
+            ));
+        }
+        for (name, desc) in &self.discovered_skills {
+            cmds.push((name.clone(), desc.clone()));
+        }
+        cmds
+    }
+
+    /// Rebuild the command palette items from all available slash commands.
+    pub fn rebuild_command_palette(&mut self) {
+        let all_cmds = self.all_slash_commands();
+        let items: Vec<SelectItem> = all_cmds
+            .into_iter()
+            .map(|(name, desc)| {
+                let is_skill = self.discovered_skills.iter().any(|(s, _)| s == &name);
+                let is_custom = self.config.commands.contains_key(&name);
+                let category = if is_skill {
+                    "Skills".to_string()
+                } else if is_custom {
+                    "Custom".to_string()
+                } else {
+                    help_command_category(&name).to_string()
+                };
+                SelectItem {
+                    id: format!("/{}", name),
+                    title: format!("/{}", name),
+                    description: desc,
+                    category,
+                    badge: None,
+                }
+            })
+            .collect();
+        self.command_palette = DialogSelectState::new("Command Palette", items);
+    }
+
+    /// Rebuild the help overlay entries from all available slash commands.
+    pub fn rebuild_help_overlay(&mut self) {
+        let all_cmds = self.all_slash_commands();
+        let entries: Vec<HelpEntry> = all_cmds
+            .into_iter()
+            .map(|(name, description)| {
+                let is_skill = self.discovered_skills.iter().any(|(s, _)| s == &name);
+                let is_custom = self.config.commands.contains_key(&name);
+                let category = if is_skill {
+                    "Skills".to_string()
+                } else if is_custom {
+                    "Custom".to_string()
+                } else {
+                    help_command_category(&name).to_string()
+                };
+                HelpEntry {
+                    name,
+                    aliases: String::new(),
+                    description,
+                    category,
+                }
+            })
+            .collect();
+        self.help_overlay.populate_from_commands(entries);
+    }
+
     /// Handle slash commands that should open UI screens rather than execute
     /// as normal commands. Returns `true` if the command was intercepted.
     pub fn intercept_slash_command_with_args(&mut self, cmd: &str, args: &str) -> bool {

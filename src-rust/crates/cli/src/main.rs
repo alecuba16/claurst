@@ -2465,6 +2465,9 @@ async fn run_interactive(
                                     session.working_dir =
                                         Some(destination.display().to_string());
                                     session.updated_at = chrono::Utc::now();
+                                    app.refresh_discovered_skills();
+                                    app.rebuild_command_palette();
+                                    app.rebuild_help_overlay();
                                     let _ =
                                         claurst_core::history::save_session(&session).await;
                                     // NOTE: opencode appends a synthetic
@@ -2663,6 +2666,9 @@ async fn run_interactive(
                                     );
                                     app.status_message =
                                         Some("Configuration updated.".to_string());
+                                    app.refresh_discovered_skills();
+                                    app.rebuild_command_palette();
+                                    app.rebuild_help_overlay();
                                 }
                                 Some(CommandResult::ConfigChangeMessage(new_cfg, msg)) => {
                                     let mut applied_cfg = new_cfg;
@@ -2683,6 +2689,9 @@ async fn run_interactive(
                                         &model_registry,
                                     );
                                     app.status_message = Some(msg);
+                                    app.refresh_discovered_skills();
+                                    app.rebuild_command_palette();
+                                    app.rebuild_help_overlay();
                                 }
                                 Some(CommandResult::UserMessage(msg)) => {
                                     // Queue a user-visible turn for the model.

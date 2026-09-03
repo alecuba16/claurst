@@ -238,6 +238,8 @@ pub struct App {
     pub notifications: NotificationQueue,
     /// Scroll offset for error modal text (in lines).
     pub error_modal_scroll_offset: usize,
+    /// Discovered skills (name, description) from scanning skill directories.
+    pub discovered_skills: Vec<(String, String)>,
     /// Plugin hint banners.
     pub plugin_hints: Vec<PluginHintBanner>,
     /// Optional session title shown in the status bar.
@@ -643,6 +645,7 @@ impl App {
             bridge_state: BridgeConnectionState::Disconnected,
             notifications: NotificationQueue::new(),
             error_modal_scroll_offset: 0,
+            discovered_skills: Vec::new(),
             plugin_hints: Vec::new(),
             session_title: None,
             remote_session_url: None,
