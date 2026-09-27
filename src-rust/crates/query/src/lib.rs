@@ -215,7 +215,7 @@ impl QueryConfig {
                 .as_ref()
                 .map(|p| p.display().to_string()),
             managed_agents: cfg.managed_agents.clone(),
-            degradation_enabled: cfg.degradation_summary_enabled,
+            degradation_enabled: cfg.degradation_summary_enabled_or_default(),
             ..Default::default()
         }
     }
@@ -237,7 +237,7 @@ impl QueryConfig {
                 .as_ref()
                 .map(|p| p.display().to_string()),
             managed_agents: cfg.managed_agents.clone(),
-            degradation_enabled: cfg.degradation_summary_enabled,
+            degradation_enabled: cfg.degradation_summary_enabled_or_default(),
             ..Default::default()
         }
     }
@@ -2922,6 +2922,18 @@ mod tests {
         tools: Vec<Box<dyn Tool>>,
         continuation: crate::continuation::ContinuationMode,
     ) -> (QueryOutcome, Vec<bool>, Vec<Message>) {
+        drive_loop_with_mock_degradation(always_end_turn, max_turns, tools, continuation, true).await
+    }
+
+    /// Same as [`drive_loop_with_mock`] but with explicit control over the
+    /// `degradation_enabled` flag on `QueryConfig`.
+    async fn drive_loop_with_mock_degradation(
+        always_end_turn: bool,
+        max_turns: u32,
+        tools: Vec<Box<dyn Tool>>,
+        continuation: crate::continuation::ContinuationMode,
+        degradation_enabled: bool,
+    ) -> (QueryOutcome, Vec<bool>, Vec<Message>) {
         let recorded = Arc::new(StdMutex::new(Vec::new()));
         let provider = Arc::new(RecordingProvider {
             id: claurst_core::provider_id::ProviderId::new("mockprov"),
@@ -2945,6 +2957,7 @@ mod tests {
         let mut config = make_config(None, None);
         config.model = "mock-model".to_string();
         config.max_turns = max_turns;
+        config.degradation_enabled = degradation_enabled;
         config.provider_registry = Some(registry);
         config.continuation = continuation;
 
@@ -3037,6 +3050,62 @@ mod tests {
                 .any(|m| m.get_all_text().contains("maximum number of steps")),
             "the tool-less summary prompt must be injected into the history"
         );
+    }
+
+    /// (c-2) With `degradation_summary_enabled: false`, hitting the turn cap
+    /// returns cold immediately: NO extra tool-less summary request is made
+    /// and the summary prompt is never injected into the history.
+    #[tokio::test]
+    async fn max_steps_with_degradation_disabled_returns_cold() {
+        // max_turns = 2: turns 1 & 2 are tool_use turns, turn 3 exceeds the cap.
+        // With the flag off the loop must stop after exactly 2 requests.
+        let (outcome, recorded, msgs) = drive_loop_with_mock_degradation(
+            false,
+            2,
+            noop_tools(),
+            crate::continuation::ContinuationMode::Default,
+            false,
+        )
+        .await;
+
+        assert!(
+            matches!(outcome, QueryOutcome::EndTurn { .. }),
+            "the disabled-flag loop must still end with EndTurn (cold return)"
+        );
+        assert_eq!(
+            recorded.len(),
+            2,
+            "no extra summary request must be dispatched when the flag is off, got {:?}",
+            recorded
+        );
+        assert!(
+            recorded.iter().all(|&empty| !empty),
+            "tools must stay enabled on every dispatched turn: {:?}",
+            recorded
+        );
+        assert!(
+            !msgs
+                .iter()
+                .any(|m| m.get_all_text().contains("maximum number of steps")),
+            "the summary prompt must NOT be injected when the flag is off"
+        );
+        // The cold return must carry the last assistant message verbatim.
+        let last_assistant = msgs
+            .iter()
+            .rev()
+            .find(|m| m.role == claurst_core::types::Role::Assistant)
+            .cloned();
+        if let QueryOutcome::EndTurn { message, .. } = &outcome {
+            let returned_text = message.get_all_text();
+            let expected_text = last_assistant
+                .as_ref()
+                .map(|m| m.get_all_text())
+                .unwrap_or_default();
+            assert_eq!(
+                returned_text, expected_text,
+                "cold return must carry the last assistant message"
+            );
+        }
     }
 
     /// (b) The goal continuation guards, exercised against an in-memory store:
