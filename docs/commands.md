@@ -396,14 +396,20 @@ Select how the model's output is rendered in the terminal. Choices include `auto
 
 ### /theme
 
-Open the interactive theme picker. Preview and select a color theme for the Claurst TUI.
+Open the interactive theme picker, or switch themes directly.
 
 ```
-/theme
+/theme              # open the picker
 /theme dark
 /theme light
 /theme solarized
+/theme my-palette   # custom theme from ~/.claurst/themes/my-palette.toml
 ```
+
+Built-in themes: `default`, `dark`, `light`, `deuteranopia`, `solarized`, `nord`,
+`dracula`, `monokai`. Custom themes are TOML files under `~/.claurst/themes/`
+(see the configuration reference for the file format). Unknown names fail with a
+list of available themes and change nothing.
 
 ---
 
