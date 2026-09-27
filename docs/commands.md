@@ -375,10 +375,16 @@ Configure and manage Model Context Protocol (MCP) servers. MCP servers expose ad
 ```
 /mcp
 /mcp list
+/mcp status
+/mcp enable <name>
+/mcp disable <name>
+/mcp tools [name]
 /mcp add <name> <command>
 /mcp remove <name>
 /mcp restart <name>
 ```
+
+`/mcp disable <name>` persists the toggle under `disabledMcpServers` in the global settings: the server is not connected, its tools are not registered, and it is skipped at startup. `/mcp enable <name>` reverts it and rebuilds the connections live. Project-level settings files cannot re-enable a server disabled globally.
 
 ---
 

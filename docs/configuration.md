@@ -50,6 +50,7 @@ values. Keys absent from the project file fall back to the global value.
   "permissionRules": [],
   "enabledPlugins": [],
   "disabledPlugins": [],
+  "disabledMcpServers": [],
   "hasCompletedOnboarding": false
 }
 ```

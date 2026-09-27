@@ -127,6 +127,7 @@ async fn build_mcp_manager(
         settings.trust_project_mcp_servers,
         &std::collections::HashSet::new(),
         &store,
+        &settings.disabled_mcp_servers,
     );
     if !decision.pending.is_empty() {
         let names: Vec<&str> = decision.pending.iter().map(|s| s.name.as_str()).collect();

@@ -700,6 +700,7 @@ async fn main() -> anyhow::Result<()> {
             settings.trust_project_mcp_servers,
             &std::collections::HashSet::new(),
             &store,
+            &settings.disabled_mcp_servers,
         )
     };
     let pending_project_mcp = mcp_decision.pending.clone();
@@ -1770,7 +1771,7 @@ fn permission_request_from_core(
 
 async fn run_interactive(
     config: Config,
-    settings: claurst_core::config::Settings,
+    mut settings: claurst_core::config::Settings,
     settings_load_error: Option<String>,
     client: Arc<claurst_api::AnthropicClient>,
     tools: Arc<Vec<Box<dyn claurst_tools::Tool>>>,
@@ -1874,6 +1875,7 @@ async fn run_interactive(
     // Set up terminal
     let mut terminal = setup_terminal(live_config.mouse_capture_enabled())?;
     let mut app = App::new(live_config.clone(), cost_tracker.clone());
+    app.disabled_mcp_servers = settings.disabled_mcp_servers.clone();
     if let Some(error) = settings_load_error {
         app.invalid_config_dialog =
             claurst_tui::InvalidConfigDialogState::show_settings_error(&error);
@@ -2625,6 +2627,26 @@ async fn run_interactive(
                                     app.status_message = Some(format!(
                                         "MCP OAuth — '{}' started. Complete authentication in your browser.\nURL: {}\nCallback URL: {}",
                                         server_name, auth_url, redirect_uri
+                                    ));
+                                }
+                                Some(CommandResult::McpServersToggled { server_name, enabled }) => {
+                                    // `/mcp enable|disable` persisted the toggle in
+                                    // global settings; reload them so the reconnect
+                                    // gate below sees the new disabled set, then
+                                    // rebuild the manager + tool list.
+                                    if let Ok(reloaded) =
+                                        claurst_core::config::Settings::load_hierarchical(
+                                            &tool_ctx.working_dir,
+                                        )
+                                        .await
+                                    {
+                                        settings = reloaded;
+                                    }
+                                    app.pending_mcp_reconnect = true;
+                                    app.status_message = Some(format!(
+                                        "MCP server '{}' {}. Rebuilding connections...",
+                                        server_name,
+                                        if enabled { "enabled" } else { "disabled" }
                                     ));
                                 }
                                 Some(CommandResult::Message(msg)) => {
@@ -4190,10 +4212,40 @@ async fn run_interactive(
                 settings.trust_project_mcp_servers,
                 &app.mcp_session_trusted,
                 &store,
+                &settings.disabled_mcp_servers,
             );
             let new_mcp_manager = connect_mcp_manager_arc(&decision.allowed).await;
+            // Log the roster change for post-mortem: which servers the rebuild
+            // keeps, which are dropped (disabled by the user, untrusted, or
+            // failed to connect — per-server connect errors are logged inside
+            // `McpManager::connect_all`).
+            {
+                let kept: Vec<String> = new_mcp_manager
+                    .as_ref()
+                    .map(|m| m.server_names())
+                    .unwrap_or_default();
+                let dropped: Vec<String> = cmd_ctx
+                    .config
+                    .mcp_servers
+                    .iter()
+                    .filter(|s| !kept.contains(&s.name))
+                    .map(|s| {
+                        if settings.disabled_mcp_servers.contains(&s.name) {
+                            format!("{} (disabled)", s.name)
+                        } else {
+                            s.name.clone()
+                        }
+                    })
+                    .collect();
+                info!(
+                    connected = ?kept,
+                    dropped = ?dropped,
+                    "MCP runtime rebuilt"
+                );
+            }
             tool_ctx.mcp_manager = new_mcp_manager.clone();
             app.mcp_manager = new_mcp_manager.clone();
+            app.disabled_mcp_servers = settings.disabled_mcp_servers.clone();
             tools_arc = build_tools_with_mcp(new_mcp_manager.clone());
             if app.mcp_view.visible {
                 app.refresh_mcp_view();
