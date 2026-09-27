@@ -146,6 +146,17 @@ Manage active and stored sessions. Subcommands allow listing, switching, deletin
 
 ---
 
+### /sessions
+
+Open the session browser overlay with an optional pre-applied filter. While the browser is open, press `/` to type a filter live, `Ctrl+U` to clear it, and `Esc` to close. Matching is case-insensitive against the session title and id.
+
+```
+/sessions
+/sessions <query>
+```
+
+---
+
 ### /fork
 
 Fork the current session into a new independent session that begins from the current conversation state. Useful for exploring two different approaches without losing either.
