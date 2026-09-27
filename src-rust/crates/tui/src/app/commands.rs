@@ -62,6 +62,7 @@ pub(super) const PROMPT_SLASH_COMMANDS: &[(&str, &str)] = &[
     ("stats", "Open token and cost stats"),
     ("survey", "Open session feedback survey"),
     ("theme", "Open the theme picker"),
+    ("turns", "Set or disable the max turn limit for this session, e.g. /turns 25 or /turns off"),
     ("ultrareview", "Run an exhaustive multi-dimensional code review"),
     ("update", "Check for updates and upgrade to the latest version"),
     ("upgrade", "Check for updates and upgrade to the latest version"),
@@ -77,7 +78,7 @@ pub(super) fn help_command_category(name: &str) -> &'static str {
         "config" | "settings" | "theme" | "keybindings" | "hooks" | "mcp" | "import-config" => {
             "Workspace"
         }
-        "agent" | "agents" | "memory" | "plugin" | "survey" => "Tools",
+        "agent" | "agents" | "memory" | "plugin" | "survey" | "turns" => "Tools",
         "session" | "resume" | "rename" | "fork" | "clear" | "new" | "move" | "compact"
         | "quit" | "exit" => "Session",
         _ => "Commands",
@@ -100,6 +101,37 @@ impl App {
     /// Handle slash commands that should open UI screens rather than execute
     /// as normal commands. Returns `true` if the command was intercepted.
     pub fn intercept_slash_command_with_args(&mut self, cmd: &str, args: &str) -> bool {
+        if cmd == "turns" {
+            let args = args.trim();
+            if args.is_empty() {
+                let msg = match self.max_turns_override {
+                    Some(n) if n == u32::MAX => {
+                        "Max turns: disabled (no limit) for this session.".to_string()
+                    }
+                    Some(n) => format!("Max turns: {} (session override).", n),
+                    None => "Max turns: using config/agent default.".to_string(),
+                };
+                self.status_message = Some(msg);
+            } else if args == "off" || args == "disable" {
+                self.max_turns_override = Some(u32::MAX);
+                self.status_message =
+                    Some("Max turns disabled (no limit) for this session.".to_string());
+            } else if let Ok(n) = args.parse::<u32>() {
+                if n == 0 {
+                    self.max_turns_override = Some(u32::MAX);
+                    self.status_message =
+                        Some("Max turns disabled (no limit) for this session.".to_string());
+                } else {
+                    self.max_turns_override = Some(n);
+                    self.status_message = Some(format!("Max turns set to {} for this session.", n));
+                }
+            } else {
+                self.status_message = Some(
+                    "Usage: /turns <number> | off | (blank to show current).".to_string(),
+                );
+            }
+            return true;
+        }
         if cmd == "mcp" && !args.trim().is_empty() {
             return false;
         }
