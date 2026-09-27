@@ -1874,6 +1874,17 @@ async fn run_interactive(
     // Set up terminal
     let mut terminal = setup_terminal(live_config.mouse_capture_enabled())?;
     let mut app = App::new(live_config.clone(), cost_tracker.clone());
+    // Populate the status-bar indicators outside the constructor so App::new
+    // stays cheap and tests never trigger real skill/MCP discovery.
+    {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        app.skill_count = claurst_core::discover_skills(&cwd, &live_config.skills).len();
+        app.mcp_server_count = tool_ctx
+            .mcp_manager
+            .as_ref()
+            .map(|manager| manager.server_count())
+            .unwrap_or(0);
+    }
     if let Some(error) = settings_load_error {
         app.invalid_config_dialog =
             claurst_tui::InvalidConfigDialogState::show_settings_error(&error);
@@ -4203,6 +4214,7 @@ async fn run_interactive(
                 .as_ref()
                 .map(|manager| manager.server_count())
                 .unwrap_or(0);
+            app.mcp_server_count = connected;
             app.status_message = Some(if cmd_ctx.config.mcp_servers.is_empty() {
                 "No MCP servers configured.".to_string()
             } else {
