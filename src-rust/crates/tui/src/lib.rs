@@ -346,6 +346,88 @@ pub fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Signal-based terminal restore
+// ---------------------------------------------------------------------------
+
+/// Human-readable name for a Unix termination signal number.
+#[cfg(unix)]
+fn signal_name(sig: i32) -> &'static str {
+    match sig {
+        1 => "SIGHUP",
+        2 => "SIGINT",
+        3 => "SIGQUIT",
+        15 => "SIGTERM",
+        _ => "signal",
+    }
+}
+
+/// Best-effort terminal restore for a signal-driven exit. The panic-hook path
+/// (`setup_terminal`) already covers panics, but SIGINT / SIGTERM / SIGHUP
+/// kill the process without unwinding, so the terminal would otherwise be left
+/// in raw mode with the kitty keyboard protocol pushed, mouse capture on, and
+/// bracketed paste enabled. The shell then echoes garbage like `e1;1:3u` until
+/// the user runs `reset`.
+///
+/// Writes to stderr: at signal time stdout may be a TTY mid-frame, and stderr
+/// is where the shell prompt lands next anyway.
+#[cfg(unix)]
+fn restore_terminal_from_signal() {
+    use std::io::Write;
+
+    let mut err = io::stderr();
+    let _ = disable_raw_mode();
+    let _ = restore_terminal_cleanup();
+    let _ = write!(err, "\x1b[?25h"); // Show cursor
+    let _ = err.flush();
+}
+
+/// Spawn tokio tasks that restore the terminal and exit the process when a
+/// termination signal arrives. Must be called from inside the tokio runtime
+/// after [`setup_terminal`] so the cleanup sequences match what was enabled.
+///
+/// Ported from jcode's `spawn_session_signal_watchers` (issue #898 there):
+/// without this, Ctrl+C in a kitty-protocol terminal leaves CSI u mode active
+/// after exit.
+#[cfg(unix)]
+pub fn spawn_signal_restore_watchers() {
+    use tokio::signal::unix::{SignalKind, signal};
+
+    fn spawn_one(sig: i32, kind: SignalKind) {
+        tokio::spawn(async move {
+            let mut stream = match signal(kind) {
+                Ok(s) => s,
+                Err(e) => {
+                    // Not fatal: the process still exits cleanly through the
+                    // normal path; we just lose the graceful terminal restore
+                    // on this signal.
+                    eprintln!(
+                        "claurst: failed to install {} handler: {}",
+                        signal_name(sig),
+                        e
+                    );
+                    return;
+                }
+            };
+            if stream.recv().await.is_some() {
+                restore_terminal_from_signal();
+                std::process::exit(128 + sig);
+            }
+        });
+    }
+
+    spawn_one(1, SignalKind::hangup()); // SIGHUP
+    spawn_one(2, SignalKind::interrupt()); // SIGINT
+    spawn_one(3, SignalKind::quit()); // SIGQUIT
+    spawn_one(15, SignalKind::terminate()); // SIGTERM
+}
+
+#[cfg(not(unix))]
+pub fn spawn_signal_restore_watchers() {
+    // Windows console control events go through the Ctrl+C handler registered
+    // by crossterm; the panic hook covers the rest.
+}
+
 /// Set the terminal window title via OSC escape sequence.
 pub fn set_terminal_title(title: &str) {
     let _ = execute!(io::stdout(), crossterm::terminal::SetTitle(title));
@@ -429,6 +511,18 @@ mod tests {
 
     fn make_app() -> App {
         App::new(Config::default(), CostTracker::new())
+    }
+
+    // ---- signal helpers --------------------------------------------------
+
+    #[cfg(unix)]
+    #[test]
+    fn signal_names_map_known_signals() {
+        assert_eq!(signal_name(1), "SIGHUP");
+        assert_eq!(signal_name(2), "SIGINT");
+        assert_eq!(signal_name(3), "SIGQUIT");
+        assert_eq!(signal_name(15), "SIGTERM");
+        assert_eq!(signal_name(9), "signal");
     }
 
     // ---- input helpers ---------------------------------------------------
