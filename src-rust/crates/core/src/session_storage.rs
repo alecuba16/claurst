@@ -1150,6 +1150,18 @@ mod tests {
 
         // Reconstructed active branch ends just before the reverted turn.
         let entries = load_transcript(&path).await.unwrap();
+        if last_leaf(&entries).and_then(|l| l.leaf_uuid.as_deref()) != Some("u2") {
+            // DIAG: dump the physical file so CI logs show exactly what the
+            // runner lost.
+            let raw2 = tokio::fs::read_to_string(&path).await.unwrap();
+            eprintln!("DIAG raw len={} lines={}", raw2.len(), raw2.lines().count());
+            eprintln!("DIAG raw: {raw2}");
+            eprintln!(
+                "DIAG loaded: {} entries, last_leaf={:?}",
+                entries.len(),
+                last_leaf(&entries).map(|l| l.leaf_uuid.clone())
+            );
+        }
         assert_eq!(
             last_leaf(&entries).and_then(|l| l.leaf_uuid.as_deref()),
             Some("u2")

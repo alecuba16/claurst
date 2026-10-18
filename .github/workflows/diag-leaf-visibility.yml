@@ -1,0 +1,58 @@
+name: diag-leaf-visibility
+
+on:
+  push:
+    branches: [diag/leaf-visibility]
+  workflow_dispatch:
+
+jobs:
+  stress:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-rust/target
+          key: diag-macos-cargo-${{ hashFiles('src-rust/Cargo.lock') }}
+          restore-keys: diag-macos-cargo-
+
+      - name: Build core test binary once
+        working-directory: src-rust
+        run: cargo test -p claurst-core --lib --no-run
+
+      - name: Stress session_storage tests x300 (CI shape)
+        working-directory: src-rust
+        run: |
+          fails=0
+          for i in $(seq 1 300); do
+            if ! cargo test -p claurst-core --lib session_storage -- --test-threads=1 > /tmp/iter.log 2>&1; then
+              fails=$((fails+1))
+              echo "=== FAILURE at iteration $i ==="
+              cat /tmp/iter.log
+            fi
+            if [ $((i % 50)) -eq 0 ]; then echo "progress: $i/300 done, $fails failures"; fi
+          done
+          echo "TOTAL FAILURES: $fails/300"
+          if [ "$fails" -gt 0 ]; then exit 1; fi
+
+      - name: Stress full workspace shape x20
+        working-directory: src-rust
+        run: |
+          fails=0
+          for i in $(seq 1 20); do
+            if ! cargo test --workspace --locked -- --test-threads=1 > /tmp/ws-iter.log 2>&1; then
+              fails=$((fails+1))
+              echo "=== WORKSPACE FAILURE at iteration $i ==="
+              grep -B 3 -A 15 "panicked" /tmp/ws-iter.log | head -60
+            fi
+          done
+          echo "WORKSPACE TOTAL FAILURES: $fails/20"
+          if [ "$fails" -gt 0 ]; then exit 1; fi
